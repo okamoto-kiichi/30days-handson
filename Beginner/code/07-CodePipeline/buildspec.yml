@@ -1,0 +1,114 @@
+version: 0.2
+
+# ECR脆弱性スキャンとCodePipelineで安全な自動デプロイを構築
+# Dockerイメージのビルド、ECRへのpush、スキャン結果チェックを実行
+
+env:
+  variables:
+    AWS_DEFAULT_REGION: "ap-northeast-1"
+    IMAGE_REPO_NAME: "demo-app"
+    IMAGE_TAG: "latest"
+  parameter-store:
+    # 必要に応じてParameter Storeから取得
+    # AWS_ACCOUNT_ID: "/codebuild/aws-account-id"
+
+phases:
+  pre_build:
+    commands:
+      - echo "事前ビルドフェーズを開始しました $(date)"
+      - echo "Amazon ECRにログイン中..."
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - ECR_REGISTRY="${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_DEFAULT_REGION}.amazonaws.com"
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY
+      - REPOSITORY_URI="${ECR_REGISTRY}/${IMAGE_REPO_NAME}"
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG="${COMMIT_HASH:=latest}"
+      - echo "イメージタグ: ${IMAGE_TAG}"
+
+  build:
+    commands:
+      - echo "ビルドフェーズを開始しました $(date)"
+      - echo "Dockerイメージをビルド中..."
+      - docker build --platform linux/amd64 -t $IMAGE_REPO_NAME:$IMAGE_TAG .
+      - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:$IMAGE_TAG
+      - docker tag $IMAGE_REPO_NAME:$IMAGE_TAG $REPOSITORY_URI:latest
+
+  post_build:
+    commands:
+      - echo "ビルド後フェーズを開始しました $(date)"
+      - echo "DockerイメージをECRにプッシュ中..."
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - docker push $REPOSITORY_URI:latest
+      - echo "Dockerプッシュが完了しました $(date)"
+      
+      # Enhanced Scanning スキャン完了まで待機
+      - echo "Enhanced Scanning のスキャン完了を待機中（5-15分程度）..."
+      - echo "初回スキャン時は最大15分かかる場合があります"
+      - sleep 60
+      
+      # Enhanced Scanning (Inspector) の結果を取得と判定
+      - echo "脆弱性スキャン結果を確認中..."
+      - |
+        # スキャン完了まで最大15分待機（30秒ごとにチェック）
+        echo "スキャン完了を待機しています..."
+        for i in {1..30}; do
+          FINDINGS_COUNT=$(aws inspector2 list-findings \
+            --filter-criteria "{\"ecrImageRepositoryName\":[{\"comparison\":\"EQUALS\",\"value\":\"$IMAGE_REPO_NAME\"}],\"ecrImageTags\":[{\"comparison\":\"EQUALS\",\"value\":\"$IMAGE_TAG\"}]}" \
+            --region $AWS_DEFAULT_REGION \
+            --max-results 1 \
+            --query 'length(findings)' \
+            --output text 2>/dev/null || echo "0")
+          
+          if [ "$FINDINGS_COUNT" != "0" ]; then
+            echo "スキャン完了を確認しました"
+            break
+          fi
+          
+          echo "待機中... ($i/30)"
+          sleep 30
+        done
+        
+        # 重大度別の脆弱性件数を取得
+        CRITICAL_COUNT=$(aws inspector2 list-findings \
+          --filter-criteria "{\"ecrImageRepositoryName\":[{\"comparison\":\"EQUALS\",\"value\":\"$IMAGE_REPO_NAME\"}],\"ecrImageTags\":[{\"comparison\":\"EQUALS\",\"value\":\"$IMAGE_TAG\"}],\"severity\":[{\"comparison\":\"EQUALS\",\"value\":\"CRITICAL\"}]}" \
+          --region $AWS_DEFAULT_REGION \
+          --query 'length(findings)' \
+          --output text 2>/dev/null || echo "0")
+        
+        HIGH_COUNT=$(aws inspector2 list-findings \
+          --filter-criteria "{\"ecrImageRepositoryName\":[{\"comparison\":\"EQUALS\",\"value\":\"$IMAGE_REPO_NAME\"}],\"ecrImageTags\":[{\"comparison\":\"EQUALS\",\"value\":\"$IMAGE_TAG\"}],\"severity\":[{\"comparison\":\"EQUALS\",\"value\":\"HIGH\"}]}" \
+          --region $AWS_DEFAULT_REGION \
+          --query 'length(findings)' \
+          --output text 2>/dev/null || echo "0")
+        
+        echo "CRITICAL レベルの脆弱性: $CRITICAL_COUNT 件"
+        echo "HIGH レベルの脆弱性: $HIGH_COUNT 件"
+        
+        # CRITICALな脆弱性が存在する場合は失敗
+        if [ "$CRITICAL_COUNT" -gt 0 ]; then
+          echo "❌ CRITICAL レベルの脆弱性が検出されました！デプロイをブロックします。"
+          exit 1
+        fi
+        
+        # 必要に応じてHIGHも判定に含める場合
+        # if [ "$HIGH_COUNT" -gt 0 ]; then
+        #   echo "⚠️  HIGH レベルの脆弱性が検出されました！確認が必要です。"
+        #   exit 1
+        # fi
+        
+        echo "✅ CRITICAL レベルの脆弱性は検出されませんでした。デプロイ可能です。"
+      
+      # ECS用のイメージ定義ファイルを出力
+      - echo "イメージ定義ファイルを出力中..."
+      - printf '[{"name":"demo-app","imageUri":"%s"}]' $REPOSITORY_URI:$IMAGE_TAG > imagedefinitions.json
+      - cat imagedefinitions.json
+
+artifacts:
+  files:
+    - imagedefinitions.json
+  name: BuildArtifact
+
+cache:
+  paths:
+    - '/root/.docker/**/*'
+

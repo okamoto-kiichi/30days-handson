@@ -1,0 +1,25 @@
+# ❌ 失敗パターン：既知の脆弱性を含む古いベースイメージを使用
+# このDockerfileは意図的に古いイメージを使用し、脆弱性スキャンで失敗することを想定しています
+# ⚠️ 本番環境では絶対に使用しないでください！デモ・検証用です
+
+FROM --platform=linux/amd64 nginx:1.19-alpine
+
+# メタデータ
+LABEL maintainer="AWS Jr Champions"
+LABEL description="ECR脆弱性スキャンとCodePipeline - 脆弱性パターン（デモ用）"
+LABEL version="vulnerable-demo"
+LABEL scan-status="vulnerable"
+LABEL warning="このイメージは検証用です。本番環境では使用しないでください"
+
+# カスタムHTMLページを追加
+RUN printf '<!DOCTYPE html>\n<html lang="ja">\n<head>\n    <meta charset="UTF-8">\n    <meta name="viewport" content="width=device-width, initial-scale=1.0">\n    <title>脆弱性デモ</title>\n    <style>\n        body { font-family: Arial, sans-serif; max-width: 800px; margin: 50px auto; padding: 20px; }\n        h1 { color: #232f3e; }\n        .status { padding: 15px; background: #f8d7da; border-left: 4px solid #dc3545; margin: 20px 0; }\n        .warning { color: #721c24; font-weight: bold; }\n    </style>\n</head>\n<body>\n    <h1>⚠️ 脆弱性検出デモ</h1>\n    <div class="status">\n        <p class="warning">❌ ステータス：このイメージには既知の脆弱性が含まれています</p>\n        <p>このイメージは意図的に古いベースイメージ（nginx:1.19-alpine）を使用しており、<br>\n        脆弱性スキャンでCRITICALまたはHIGHレベルの脆弱性が検出される可能性があります。</p>\n    </div>\n    <p><strong>⚠️ 注意：</strong>このイメージは学習・デモ目的でのみ使用してください。</p>\n    <div>\n        <h3>検証目的：</h3>\n        <ul>\n            <li>ECRの脆弱性スキャン機能を確認</li>\n            <li>CodeBuildでのスキャン結果チェックを検証</li>\n            <li>脆弱性検出時のパイプライン失敗を体験</li>\n        </ul>\n    </div>\n</body>\n</html>' > /usr/share/nginx/html/index.html
+
+# ヘルスチェック用エンドポイント
+RUN echo 'vulnerable' > /usr/share/nginx/html/health
+
+# 80番ポートを公開
+EXPOSE 80
+
+# Nginxをフォアグラウンドで実行
+CMD ["nginx", "-g", "daemon off;"]
+

@@ -1,0 +1,49 @@
+# Dockerビルド時に除外するファイル
+
+# Git関連
+.git
+.gitignore
+.gitattributes
+
+# ドキュメント
+README.md
+*.md
+
+# AWS関連
+buildspec.yml
+.aws
+
+# ログファイル
+*.log
+
+# 一時ファイル
+*.tmp
+*.temp
+.DS_Store
+Thumbs.db
+
+# IDE設定
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# Node.js（使用する場合）
+node_modules
+npm-debug.log
+
+# Python（使用する場合）
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+*.egg
+*.egg-info
+
+# その他の開発ファイル
+.env
+.env.local
+docker-compose.yml
