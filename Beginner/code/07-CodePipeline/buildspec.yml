@@ -8,9 +8,9 @@ env:
     AWS_DEFAULT_REGION: "ap-northeast-1"
     IMAGE_REPO_NAME: "demo-app"
     IMAGE_TAG: "latest"
-  parameter-store:
-    # 必要に応じてParameter Storeから取得
-    # AWS_ACCOUNT_ID: "/codebuild/aws-account-id"
+
+phases:
+  pre_build:
     commands:
       - echo "事前ビルドフェーズを開始しました $(date)"
       - echo "Amazon ECRにログイン中..."
