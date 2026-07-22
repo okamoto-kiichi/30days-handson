@@ -11,9 +11,6 @@ env:
   parameter-store:
     # 必要に応じてParameter Storeから取得
     # AWS_ACCOUNT_ID: "/codebuild/aws-account-id"
-
-phases:
-  pre_build:
     commands:
       - echo "事前ビルドフェーズを開始しました $(date)"
       - echo "Amazon ECRにログイン中..."
